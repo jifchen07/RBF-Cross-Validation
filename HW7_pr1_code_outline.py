@@ -18,7 +18,7 @@ from sklearn.metrics import mean_squared_error
 from sklearn.metrics.pairwise import rbf_kernel
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import KFold
-
+import matplotlib.pyplot as plt
 
 def load_data(datapath):
     df = pd.read_csv(datapath, header=None)
@@ -53,6 +53,7 @@ def rbf_layer2(X, y=None, weight=None):
 
 def choose_centers(X, M, mode=1):
     """Three different ways of selecting centers"""
+    # M is scalar
     if mode == 1:  # (c)
         centers_ = X
     elif mode == 2:  # (d)
@@ -72,33 +73,49 @@ def cal_mse(y, y_pred):
     return mse
 
 
-def calculate_gamma(X, M):
-    """Calculate gamma"""
-    avg_spacing_ = cal_avg_spacing(X, M)
-    sigma_ = 2 * avg_spacing
-    gamma_ = 1 / (2 * sigma_**2)
-    return gamma_
+# def calculate_gamma(X, M):
+#     """Calculate gamma"""
+#     avg_spacing_ = cal_avg_spacing(X, M)
+#     sigma_ = 2 * avg_spacing_
+#     gamma_ = 1 / (2 * sigma_**2)
+#     return gamma_
+#
+#
+# def cal_avg_spacing(X, M):
+#     """Calculate average spacing"""
+#     n_features = X.shape[1]
+#     delta_acc = 1
+#     for i in range(n_features):
+#         delta = np.max(X[:, i]) - np.min(X[:, i])
+#         delta_acc *= delta
+#     avg_space = (delta_acc / M) ** (1 / n_features)
+#     return avg_space
 
-
-def cal_avg_spacing(X, M):
-    """Calculate average spacing"""
+def calculate_gamma_all(X, M):
+    # M is 1d array
     n_features = X.shape[1]
     delta_acc = 1
     for i in range(n_features):
         delta = np.max(X[:, i]) - np.min(X[:, i])
         delta_acc *= delta
-    avg_space = (delta_acc / M) ** (1 / n_features)
-    return avg_space
+    gamma_ = 1 / (8 * delta_acc) * M
+    return gamma_
 
+def visualize(X, y):
+    fig = plt.figure()
+    ax = plt.axes(projection='3d')
+    ax.scatter(X[:, 0], X[:, 1], y, marker='o')
+    plt.show()
 
 if __name__ == "__main__":
     '''Example structure'''
-    MODE = 1  # Example: mode == 3: using K-means for center selection
-    v = 0.1
+    MODE = 2  # Example: mode == 3: using K-means for center selection
+    v = np.linspace(0.02, 0.2, num=10)
     K = 500
 
     # ------------- Load data -------------
     X, y = load_data('H7_Dn_train.csv')
+    visualize(X, y)
 
     # (b) mse for trivial system
     ytr_mean = np.mean(y)
@@ -108,58 +125,68 @@ if __name__ == "__main__":
     # ============================= Start of "RBFN Module" =============================
     # ------------- Calculate M using v or K -------------
     if MODE == 1:
-        M = X.shape[0]
+        M = np.array([X.shape[0]])
     elif MODE == 2:
-        M = int(v * X.shape[0])
+        M = (v * X.shape[0]).astype(int)
     elif MODE == 3:
-        M = K
+        M = np.array([K])
 
     # ------------- Find average spacing and initial gamma -------------
-    avg_spacing = cal_avg_spacing(X, M)
-    gamma = calculate_gamma(X, M)
-    gammas = gamma * np.logspace(-3, 3, num=7, base=2)
+    # avg_spacing = cal_avg_spacing(X, M)
+    # M <-> gamma <-> centers
+    gammas = calculate_gamma_all(X, M)   # (n_M, )   gamma baselines
+    variations = np.logspace(-2, 2, num=5, base=2)  # (n_M, n_g)    gamma variations
 
-    # ------------- Select centers -------------
-    centers = choose_centers(X, M, mode=MODE)
-
-    # ------------- Start 2 layers of RBF Network -------------
-    # Layer 1
-    phi_x = rbf_layer1(X, centers, gamma)   # (n_samples, M)
-    # Layer 2
-    linear_layer2 = rbf_layer2(phi_x, y)
-    y_hat = rbf_layer2(phi_x, weight=linear_layer2)
-
-    # ------------- Calculate MSE -------------
-    MSE = cal_mse(y, y_hat)
-
-    print(f'mse of training: {MSE}')
+    # # ------------- Select centers -------------
+    # centers = choose_centers(X, M, mode=MODE)
+    #
+    # # ------------- Start 2 layers of RBF Network -------------
+    # # Layer 1
+    # phi_x = rbf_layer1(X, centers, gamma)   # (n_samples, M)
+    # # Layer 2
+    # linear_layer2 = rbf_layer2(phi_x, y)
+    # y_hat = rbf_layer2(phi_x, weight=linear_layer2)
+    #
+    # # ------------- Calculate MSE -------------
+    # MSE = cal_mse(y, y_hat)
+    #
+    # print(f'mse of training: {MSE}')
 
     # for cross validation
 
-
     T = 20
     n_splits = 5
+    mses = np.zeros((len(gammas), len(variations), T, n_splits))
 
-    mses = np.zeros((len(gammas), T, n_splits))
     for t in range(T):
+        print(f'cross validation run {t+1}')
         skf = KFold(n_splits=n_splits, random_state=t, shuffle=True)
-        for j, (tr_idxs, va_idxs) in enumerate(skf.split(X, y)):
+        for k, (tr_idxs, va_idxs) in enumerate(skf.split(X, y)):
             for i, gamma in enumerate(gammas):
-                phi_X = rbf_layer1(X, centers, gamma)
-                phi_X_tr, phi_X_va = phi_X[tr_idxs], phi_X[va_idxs]
-                y_tr, y_va = y[tr_idxs], y[va_idxs]
+                centers = choose_centers(X, M[i], mode=MODE)   # each gamma/M will generate different center
+                for j, var in enumerate(variations):
+                    gamma_var = gamma * var # apply variation to gamma
+                    phi_X = rbf_layer1(X, centers, gamma_var)
+                    phi_X_tr, phi_X_va = phi_X[tr_idxs], phi_X[va_idxs]
+                    y_tr, y_va = y[tr_idxs], y[va_idxs]
 
-                linear_layer2 = rbf_layer2(phi_X_tr, y_tr)
-                y_hat = rbf_layer2(phi_X_va, weight=linear_layer2)
+                    linear_layer2 = rbf_layer2(phi_X_tr, y_tr)
+                    y_hat = rbf_layer2(phi_X_va, weight=linear_layer2)
 
-                mses[i][t][j] = cal_mse(y_va, y_hat)
+                    # if i == 2 and j == 0:
+                    #     print(gamma, var)
+                    #     visualize(X[va_idxs], y_hat)
+                    mses[i][j][t][k] = cal_mse(y_va, y_hat)
 
-    mses = mses.reshape((len(gammas), -1))
-    mse_means = np.mean(mses, axis=1)
-    mse_stds = np.std(mses, axis=1)
+    mses = mses.reshape((len(gammas), len(variations), -1))
+    mse_means = np.mean(mses, axis=2)
+    mse_stds = np.std(mses, axis=2)
 
-    min_idx = np.argmin(mse_means)
-    print(f'when gamma is {gammas[min_idx]:.3}, the validation error is the smallest:\n'
+    min_idx = np.unravel_index(mse_means.argmin(), mse_means.shape)
+    gamma_opt = gammas[min_idx[0]] * variations[min_idx[1]]
+    M_opt = M[min_idx[0]]
+    std_opt = mse_stds[min_idx]
+    print(f'when gamma is {gamma_opt:.3}, the average validation error is the smallest:\n'
           f'mean is {mse_means[min_idx]:.3}, std is {mse_stds[min_idx]:.3}')
     # ============================= End of "RBFN Module" =============================
 

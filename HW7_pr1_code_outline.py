@@ -62,7 +62,8 @@ def choose_centers(X, M, mode=1):
         centers_ = X[random_idxs_, :]
     elif mode == 3:  # (e)
         # K-means clustering
-        centers_ = []
+        kmeans = KMeans(n_clusters=M, init='random', random_state=0).fit(X)
+        centers_ = kmeans.cluster_centers_
 
     return centers_
 
@@ -111,11 +112,11 @@ if __name__ == "__main__":
     '''Example structure'''
     MODE = 2  # Example: mode == 3: using K-means for center selection
     v = np.linspace(0.02, 0.2, num=10)
-    K = 500
+    K = 24  # value got from mode 2
 
     # ------------- Load data -------------
     X, y = load_data('H7_Dn_train.csv')
-    visualize(X, y)
+    # visualize(X, y)
 
     # (b) mse for trivial system
     ytr_mean = np.mean(y)
@@ -124,18 +125,6 @@ if __name__ == "__main__":
 
     # ============================= Start of "RBFN Module" =============================
     # ------------- Calculate M using v or K -------------
-    if MODE == 1:
-        M = np.array([X.shape[0]])
-    elif MODE == 2:
-        M = (v * X.shape[0]).astype(int)
-    elif MODE == 3:
-        M = np.array([K])
-
-    # ------------- Find average spacing and initial gamma -------------
-    # avg_spacing = cal_avg_spacing(X, M)
-    # M <-> gamma <-> centers
-    gammas = calculate_gamma_all(X, M)   # (n_M, )   gamma baselines
-    variations = np.logspace(-2, 2, num=5, base=2)  # (n_M, n_g)    gamma variations
 
     # # ------------- Select centers -------------
     # centers = choose_centers(X, M, mode=MODE)
@@ -154,8 +143,25 @@ if __name__ == "__main__":
 
     # for cross validation
 
+    # ------------- Find average spacing and initial gamma -------------
+    # avg_spacing = cal_avg_spacing(X, M)
+    # M <-> gamma <-> centers
+
     T = 20
     n_splits = 5
+
+    training_size = X.shape[0] * (n_splits - 1) // n_splits
+
+    if MODE == 1:
+        M = np.array([training_size])
+    elif MODE == 2:
+        M = (v * training_size).astype(int)
+    elif MODE == 3:
+        M = np.linspace(K-12, K+12, num=7, dtype=int)
+
+    gammas = calculate_gamma_all(X, M)   # (n_M, )   gamma baselines
+    variations = np.logspace(-2, 2, num=5, base=2)  # (n_M, n_g)    gamma variations
+
     mses = np.zeros((len(gammas), len(variations), T, n_splits))
 
     for t in range(T):
@@ -163,7 +169,7 @@ if __name__ == "__main__":
         skf = KFold(n_splits=n_splits, random_state=t, shuffle=True)
         for k, (tr_idxs, va_idxs) in enumerate(skf.split(X, y)):
             for i, gamma in enumerate(gammas):
-                centers = choose_centers(X, M[i], mode=MODE)   # each gamma/M will generate different center
+                centers = choose_centers(X[tr_idxs], M[i], mode=MODE)   # each gamma/M will generate different center
                 for j, var in enumerate(variations):
                     gamma_var = gamma * var # apply variation to gamma
                     phi_X = rbf_layer1(X, centers, gamma_var)
@@ -186,7 +192,7 @@ if __name__ == "__main__":
     gamma_opt = gammas[min_idx[0]] * variations[min_idx[1]]
     M_opt = M[min_idx[0]]
     std_opt = mse_stds[min_idx]
-    print(f'when gamma is {gamma_opt:.3}, the average validation error is the smallest:\n'
+    print(f'when gamma is {gamma_opt:.3}, M is {M_opt}, the average validation error is the smallest:\n'
           f'mean is {mse_means[min_idx]:.3}, std is {mse_stds[min_idx]:.3}')
     # ============================= End of "RBFN Module" =============================
 
